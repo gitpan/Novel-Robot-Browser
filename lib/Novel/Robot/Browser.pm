@@ -5,11 +5,12 @@
 #===============================================================================
 
 package Novel::Robot::Browser;
+
 use strict;
 use warnings;
 use utf8;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 use Encode::Detect::CJK qw/detect/;
 use Encode;
@@ -85,4 +86,3 @@ sub make_post_data {
 
 no Moo;
 1;
-
