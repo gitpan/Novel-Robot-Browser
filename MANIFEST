@@ -1,9 +1,7 @@
-Changes
-lib/Novel/Robot/Browser.pm
+LICENSE
+MANIFEST
+META.yml
 Makefile.PL
-MANIFEST			This list of files
 README
-t/00-load.t
-t/manifest.t
-t/pod-coverage.t
-t/pod.t
+dist.ini
+lib/Novel/Robot/Browser.pm

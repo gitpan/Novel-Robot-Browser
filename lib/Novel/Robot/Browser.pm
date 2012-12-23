@@ -1,16 +1,10 @@
-#===============================================================================
-#  DESCRIPTION: 自动化获取网页内容，并解码为unicode
-#       AUTHOR: Abby Pan (USTC), abbypan@gmail.com
-#      CREATED: 2012年12月23日 02时10分36秒
-#===============================================================================
+# ABSTRACT: 自动化获取网页内容，并解码为unicode
 
 package Novel::Robot::Browser;
 
 use strict;
 use warnings;
 use utf8;
-
-our $VERSION = '0.02';
 
 use Encode::Detect::CJK qw/detect/;
 use Encode;
