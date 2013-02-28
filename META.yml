@@ -17,4 +17,4 @@ requires:
   HTTP::Tiny: 0.024
   IO::Uncompress::Gunzip: 2.059
   Moo: 1.000007
-version: 0.05
+version: 0.06
