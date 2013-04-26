@@ -25,7 +25,7 @@ my %WriteMakefileArgs = (
     "IO::Uncompress::Gunzip" => "2.059",
     "Moo" => "1.000007"
   },
-  "VERSION" => "0.06",
+  "VERSION" => "0.07",
   "test" => {
     "TESTS" => ""
   }
