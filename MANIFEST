@@ -3,6 +3,6 @@ MANIFEST
 META.yml
 Makefile.PL
 README
-README.md
+README.pod
 dist.ini
 lib/Novel/Robot/Browser.pm
