@@ -22,12 +22,11 @@ my %WriteMakefileArgs = (
   "NAME" => "Novel::Robot::Browser",
   "PREREQ_PM" => {
     "Encode::Detect::CJK" => 0,
-    "Moo" => 0,
     "Parallel::ForkManager" => 0,
     "WWW::Mechanize" => 0
   },
   "TEST_REQUIRES" => {},
-  "VERSION" => "0.11",
+  "VERSION" => "0.12",
   "test" => {
     "TESTS" => ""
   }
@@ -36,7 +35,6 @@ my %WriteMakefileArgs = (
 
 my %FallbackPrereqs = (
   "Encode::Detect::CJK" => 0,
-  "Moo" => 0,
   "Parallel::ForkManager" => 0,
   "WWW::Mechanize" => 0
 );
