@@ -5,11 +5,12 @@ use strict;
 use warnings;
 use utf8;
 
-our $VERSION = 0.13;
+our $VERSION = 0.14;
 
 use Encode::Detect::CJK qw/detect/;
 use Encode;
 use WWW::Mechanize;
+use Term::ProgressBar;
 
 sub new {
     my ($self, %opt) = @_;
@@ -44,41 +45,41 @@ sub _init_browser {
     return $http;
 } ## end sub init_browser
 
-use threads;
-use threads::shared;
-use Thread::Semaphore;
-sub request_urls {
-    my ($self, $arr, %opt) = @_;
-    $opt{request_sub} ||= sub {
-        my ($x) = @_;
-        my ($url, $post_var) = exists $opt{url_sub} ? $opt{url_sub}->($x) : 
-        ref($x) eq 'HASH' ? ( $x->{url}, $x->{post_var} )  :
-        ref($x) eq 'ARRAY' ? @$x : 
-        ($x, undef);
-        return $self->request_url($url, $post_var);
-    };
+#use threads;
+#use threads::shared;
+#use Thread::Semaphore;
+#sub request_urls {
+    #my ($self, $arr, %opt) = @_;
+    #$opt{request_sub} ||= sub {
+        #my ($x) = @_;
+        #my ($url, $post_var) = exists $opt{url_sub} ? $opt{url_sub}->($x) : 
+        #ref($x) eq 'HASH' ? ( $x->{url}, $x->{post_var} )  :
+        #ref($x) eq 'ARRAY' ? @$x : 
+        #($x, undef);
+        #return $self->request_url($url, $post_var);
+    #};
 
-    my $sem = Thread::Semaphore->new($self->{max_process_num});
-    my $work_func = sub {
-        my ($i) = @_;
-        my $x = $arr->[$i];
-        my $s = $opt{request_sub}->($x);
-        $s = $opt{deal_sub}->($x, $s) if(exists $opt{deal_sub});
-        $sem->up;
-        return [$i, $s ];
-    };
-    my @threads = map {
-        $sem->down;
-        threads->create($work_func, $_);
-    } 0..$#$arr;
+    #my $sem = Thread::Semaphore->new($self->{max_process_num});
+    #my $work_func = sub {
+        #my ($i) = @_;
+        #my $x = $arr->[$i];
+        #my $s = $opt{request_sub}->($x);
+        #$s = $opt{deal_sub}->($x, $s) if(exists $opt{deal_sub});
+        #$sem->up;
+        #return [$i, $s ];
+    #};
+    #my @threads = map {
+        #$sem->down;
+        #threads->create($work_func, $_);
+    #} 0..$#$arr;
 
-    my @res;
-    for (@threads){
-        my $r = $_->join;
-        $res[$r->[0]] = $r->[1];
-    }
-    return \@res;
-}
+    #my @res;
+    #for (@threads){
+        #my $r = $_->join;
+        #$res[$r->[0]] = $r->[1];
+    #}
+    #return \@res;
+#}
 
 #use Coro;
 #sub request_urls {
@@ -108,42 +109,49 @@ sub request_urls {
     #return \@res;
 #}
 
-#use Parallel::ForkManager;
-#sub request_urls {
-    #my ($self, $arr, %opt) = @_;
+use Parallel::ForkManager;
+sub request_urls {
+    my ($self, $arr, %opt) = @_;
 
-    #my @res;
-    #my $pm = Parallel::ForkManager->new( $self->{max_process_num} );
-    #$pm->run_on_finish(
-        #sub {
-            #my ( $pid, $exit_code, $ident, $exit, $core, $data ) = @_;
-            #return unless($data);
-            #my ($i, $r) = @$data;
-            #$res[$i] = $r;
-        #}
-    #);
+    my $progress;
+    $progress = Term::ProgressBar->new ({ count => scalar(@$arr) }) 
+    if($opt{show_progress_bar});
+    my $cnt = 0;
 
-    #$opt{request_sub} ||= sub {
-        #my ($x) = @_;
-        #my ($url, $post_var) = exists $opt{url_sub} ? $opt{url_sub}->($x) : 
-        #ref($x) eq 'HASH' ? ( $x->{url}, $x->{post_var} )  :
-        #ref($x) eq 'ARRAY' ? @$x : 
-        #($x, undef);
-        #return $self->request_url($url, $post_var);
-    #};
+    my @res;
+    my $pm = Parallel::ForkManager->new( $self->{max_process_num} );
+    $pm->run_on_finish(
+        sub {
+            my ( $pid, $exit_code, $ident, $exit, $core, $data ) = @_;
+            $cnt++;
+            $progress->update($cnt) if($opt{show_progress_bar});
+            return unless($data);
+            my ($i, $r) = @$data;
+            $res[$i] = $r;
+        }
+    );
 
-    #for my $i (0 .. $#$arr){
-        #my $pid = $pm->start and next;
-        #my $x = $arr->[$i];
+    $opt{request_sub} ||= sub {
+        my ($x) = @_;
+        my ($url, $post_var) = exists $opt{url_sub} ? $opt{url_sub}->($x) : 
+        ref($x) eq 'HASH' ? ( $x->{url}, $x->{post_var} )  :
+        ref($x) eq 'ARRAY' ? @$x : 
+        ($x, undef);
+        return $self->request_url($url, $post_var);
+    };
 
-        #my $s = $opt{request_sub}->($x);
-        #$s = $opt{deal_sub}->($x, $s) if(exists $opt{deal_sub});
+    for my $i (0 .. $#$arr){
+        my $pid = $pm->start and next;
+        my $x = $arr->[$i];
 
-        #$pm->finish( 0, [ $i, $s ] );
-    #}
-    #$pm->wait_all_children;
-    #return \@res;
-#}
+        my $s = $opt{request_sub}->($x);
+        $s = $opt{deal_sub}->($x, $s) if(exists $opt{deal_sub});
+
+        $pm->finish( 0, [ $i, $s ] );
+    }
+    $pm->wait_all_children;
+    return \@res;
+}
 
 sub request_url {
     my ( $self, $url, $post_data ) = @_;
