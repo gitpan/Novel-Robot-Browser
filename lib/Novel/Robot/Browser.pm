@@ -5,7 +5,7 @@ use strict;
 use warnings;
 use utf8;
 
-our $VERSION = 0.15;
+our $VERSION = 0.16;
 
 use Encode::Detect::CJK qw/detect/;
 use Encode;
@@ -13,16 +13,17 @@ use HTTP::Tiny;
 use Parallel::ForkManager;
 use Term::ProgressBar;
 use IO::Uncompress::Gunzip qw(gunzip);
+use URI::Escape;
 
+our $DEFAULT_URL_CONTENT = '';
 our %DEFAULT_HEADER = (
-    'Accept' =>
-      'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 
     'Accept-Charset'  => 'gb2312,utf-8;q=0.7,*;q=0.7',
     'Accept-Encoding' => "gzip",
+    'Accept-Language' => 'zh,zh-cn;q=0.8,en-us;q=0.5,en;q=0.3', 
     'Connection'      => 'keep-alive',
-    'User-Agent' =>
-      'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0; MALC)',
-    'Accept-Language' => "zh-cn,zh-tw;q=0.7, en-us,*;q=0.3",
+    'User-Agent' => 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:29.0) Gecko/20100101 Firefox/29.0', 
+    'DNT' => 1, 
 );
 
 sub new {
@@ -45,51 +46,90 @@ sub _init_browser {
 } ## end sub init_browser
 
 sub request_urls {
-    my ( $self, $arr, %opt ) = @_;
+    my ( $self, $src_arr, %opt ) = @_;
+    # arr : url / { url => .. }
+    # process_sub => sub { my ($html_ref) = @_ ; ... }
+    my $arr = $opt{select_url_sub}->( $src_arr );
+    
+    my $iter_sub = sub {
+        my ($r) = @_;
+        return $opt{data_sub}->(@_) if($opt{no_auto_request_url});
+
+        my ( $url, $post_data ) =
+        ref($r) eq 'HASH' ? @{$r}{qw/url post_data/} 
+        : ( $r, undef );
+
+        my @procss_data = ($url, $post_data); 
+        if($url=~/^https?:/){
+            my $h = $self->request_url( $url, $post_data );
+            @procss_data = ( \$h );
+        }
+        my @return_data = exists $opt{data_sub} ?
+        $opt{data_sub}->(@procss_data) : @procss_data;
+        return @return_data;
+    };
 
     my $progress;
     $progress = Term::ProgressBar->new( { count => scalar(@$arr) } )
       if ( $opt{show_progress_bar} );
-    my $cnt = 0;
 
-    my @res;
+    my $cnt = 0;
+    my @res_arr;
+
     my $pm = Parallel::ForkManager->new( $self->{max_process_num} );
-    $pm->run_on_finish(
-        sub {
+    $pm->run_on_finish(sub {
             my ( $pid, $exit_code, $ident, $exit, $core, $data ) = @_;
+
             $cnt++;
             $progress->update($cnt) if ( $opt{show_progress_bar} );
             return unless ($data);
-            my ( $i, $r ) = @$data;
-            $res[$i] = $r;
-        }
-    );
 
-    $opt{request_sub} ||= sub {
-        my ($x) = @_;
-        my ( $url, $post_var ) =
-            exists $opt{url_sub} ? $opt{url_sub}->($x)
-          : ref($x) eq 'HASH' ? ( $x->{url}, $x->{post_var} )
-          : ref($x) eq 'ARRAY' ? @$x
-          :                      ( $x, undef );
-        return $self->request_url( $url, $post_var );
-    };
+            my ( $id, @res ) = @$data;
+            $res_arr[$id] = $#res==0 ? $res[0] : \@res;
+        });
 
     for my $i ( 0 .. $#$arr ) {
         my $pid = $pm->start and next;
-        my $x = $arr->[$i];
-
-        my $s = $opt{request_sub}->($x);
-        $s = $opt{deal_sub}->( $x, $s ) if ( exists $opt{deal_sub} );
-
-        $pm->finish( 0, [ $i, $s ] );
+        my @s = $iter_sub->($arr->[$i]);
+        $pm->finish( 0, [ $i, @s ] );
     }
+
     $pm->wait_all_children;
-    return \@res;
+
+    return \@res_arr;
 }
+
+sub request_urls_iter {
+    my ( $self, $url, %o ) = @_;
+
+    my $html = $self->request_url($url, $o{post_data});
+
+    my $info      = $o{info_sub}->( \$html )      || {};
+    my $data_list = $o{data_list_sub}->( \$html ) || [];
+
+    return ( $info, $data_list ) if ( $o{stop_sub}->( $info, $data_list ) );
+
+    my $url_list = $o{url_list_sub}->( \$html ) || [];
+    my $select_url_list = $o{select_url_sub}->( $url_list );
+    for my $u (@$select_url_list) {
+        return ( $info, $data_list ) if ( $o{stop_sub}->( $info, $data_list ) );
+
+        my ( $u_url, $u_post_data ) =
+        ref($u) eq 'HASH' ? @{$u}{qw/url post_data/} 
+        : ( $u, undef );
+
+        my $c = $self->request_url($u_url, $u_post_data);
+
+        my $fs = $o{data_list_sub}->( \$c ) || [];
+        push @$data_list, @$fs;
+    }
+
+    return ( $info, $data_list );
+} ## end sub get_tiezi_ref
 
 sub request_url {
     my ( $self, $url, $form ) = @_;
+    return $DEFAULT_URL_CONTENT unless($url);
 
     my $c;
     for my $i ( 1 .. $self->{retry} ) {
@@ -98,7 +138,19 @@ sub request_url {
         sleep 2;
     }
 
-    return $c;
+    return $c || $DEFAULT_URL_CONTENT;
+}
+
+sub format_post_content {
+    my ($self, $form) = @_;
+
+    my @params;
+    while(my ($k, $v) = each %$form){
+        push @params, uri_escape($k)."=".uri_escape($v);
+    }
+
+    my $post_str = join("&", @params);
+    return $post_str;
 }
 
 sub request_url_simple {
@@ -106,20 +158,27 @@ sub request_url_simple {
 
     my $res =
         $form
-      ? $self->{browser}->post_form( $url, $form )
+      ? 
+      $self->{browser}->request('POST', $url, {
+              content => $self->format_post_content($form),
+               headers => { 
+                   %DEFAULT_HEADER, 
+                   'content-type' => 'application/x-www-form-urlencoded' }, 
+          })
       : $self->{browser}->get($url);
-    return unless ( $res->{success} );
+    return $DEFAULT_URL_CONTENT unless ( $res->{success} );
 
     my $html;
     my $content = $res->{content};
-    if ( $res->{headers}{'content-encoding'} eq 'gzip' ) {
+    if ( $res->{headers}{'content-encoding'} and
+         $res->{headers}{'content-encoding'} eq 'gzip' ) {
         gunzip \$content => \$html, MultiStream => 1, Append => 1;
     }
 
     my $charset = detect( $html || $content );
     my $r = decode( $charset, $html || $content, Encode::FB_XMLCREF );
 
-    return \$r;
+    return $r || $DEFAULT_URL_CONTENT;
 }
 
 1;
